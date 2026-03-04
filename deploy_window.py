@@ -451,6 +451,14 @@ class window(FileSystemEventHandler):
         remote_path = os.path.join(self.current_remote_path, relative_path)
 
         return remote_path.replace("\\", "/")
+    
+    def get_local_path(self, remote_path):
+
+        relative_path = os.path.relpath(remote_path, self.current_remote_path)
+
+        local_path = os.path.join(self.current_local_path, relative_path)
+
+        return local_path.replace("\\", "/")
 
     def is_ignored(self, path):
         """Checks if any part of the path is in the ignore list."""
@@ -497,10 +505,32 @@ class window(FileSystemEventHandler):
                         self.log_queue.put(f"Pushed offline update: {item}")
         except Exception as e:
             self.log_queue.put(f"Initial Push Error: {e}")
+    
+    def search_remove_remote(self,remote_path):
+        try: 
+            for item in self.sftp.listdir_attr(remote_path):
+                if self.is_ignored(item.filename):
+                    continue
+                remote_item_path = os.path.join(remote_path, item.filename).replace("\\", "/")
+                local_item_path = self.get_local_path(remote_item_path)
+
+                if stat.S_ISDIR(item.st_mode):
+                    self.search_remove_remote(remote_item_path)
+                    if not os.path.exists(local_item_path):
+                        self.sftp.rmdir(remote_item_path)
+                else:
+                    if not os.path.exists(local_item_path):
+                        self.sftp.remove(remote_item_path)
+        except Exception as e:
+            self.log_queue.put(f"Initial Cleanup Error: {e}")
+
+
 
     def start_full_deploy(self):
         self.log_queue.put("Pushing offline updates...")
         self.search_push_local(self.current_local_path)
+        self.log_queue.put("Cleaning remote folder...")
+        self.search_remove_remote(self.current_remote_path)
         self.root.after(0, self.start_watchdog)
 
     def start_observer(self):
